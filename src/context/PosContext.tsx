@@ -143,12 +143,21 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [settings, setSettings] = useState<StoreSettings>(() => {
+    const defaultSupUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || '';
+    const defaultSupAnon = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || '';
+    const defaultProvider = (defaultSupUrl && defaultSupAnon) ? 'supabase' : 'firebase';
+
     const cached = localStorage.getItem('pos_settings');
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === 'object' && parsed.logo) {
-          return parsed;
+          return {
+            dbProvider: defaultProvider,
+            supabaseUrl: defaultSupUrl,
+            supabaseAnonKey: defaultSupAnon,
+            ...parsed
+          };
         }
       } catch (e) {}
     }
@@ -158,7 +167,10 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       nameThai: 'ระบบบริหารหน้าร้าน คลังพัสดุและฐานสมาชิก',
       themeColor: 'purple',
       promptPayId: '0812345678',
-      trueMoneyPhone: '0812345678'
+      trueMoneyPhone: '0812345678',
+      dbProvider: defaultProvider,
+      supabaseUrl: defaultSupUrl,
+      supabaseAnonKey: defaultSupAnon
     };
   });
 
