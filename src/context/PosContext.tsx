@@ -441,8 +441,9 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAuthLoading(true);
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      console.error("Login fail:", err);
+      console.error("Login fail in provider context:", err);
       setError("ไม่สามารถเข้าสู่ระบบผ่าน Google ได้");
+      throw err;
     } finally {
       setAuthLoading(false);
     }

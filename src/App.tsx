@@ -175,13 +175,67 @@ const AppContent: React.FC = () => {
       }
     }).then((result) => {
       if (result.isConfirmed) {
-        loginWithGoogle().catch((err) => {
-          Swal.fire({
-            icon: 'error',
-            title: 'เชื่อมต่อนล้มเหลว',
-            text: 'ไม่สามารถประสาน Google Login ได้ชั่วขณะ กรุณาลองใหม่อีกครั้ง',
-            confirmButtonColor: '#ef4444'
-          });
+        loginWithGoogle().catch((err: any) => {
+          console.error("Auth failure caught in UI alert:", err);
+          const isUnauthorizedDomain = err?.code === 'auth/unauthorized-domain' || 
+                                       err?.message?.includes('auth/unauthorized-domain') ||
+                                       (err instanceof Error && err.message.includes('auth/unauthorized-domain'));
+          
+          if (isUnauthorizedDomain) {
+            Swal.fire({
+              icon: 'error',
+              title: 'โดเมนยังไม่ได้รับอนุญาต (Unauthorized Domain)',
+              html: `
+                <div class="text-left font-sans text-xs space-y-3 leading-relaxed text-slate-705">
+                  <p class="font-bold text-rose-600 text-sm">❌ ตรวจพบข้อผิดพลาดด้านความปลอดภัยโดเมนของ Firebase Auth</p>
+                  <p>ระบบตรวจพบว่าโดเมนปัจจุบันที่คุณพยายามล็อกอิน <strong>ไม่ได้บันทึกอยู่ใน รายการโดเมนที่ได้รับอนุญาต (Authorized Domains)</strong> ในหน้าการตั้งค่า Firebase Authentication ของคุณ</p>
+                  
+                  <div class="bg-slate-50 border border-slate-150 rounded-xl p-3 space-y-2 mt-2">
+                    <p class="font-bold text-slate-800">🛠️ วิธีแก้ไขความปลอดภัยบน Firebase Console:</p>
+                    <ol class="list-decimal pl-4 space-y-1 text-[11px] text-slate-700">
+                      <li>เปิด <strong>Firebase Console</strong> ของโปรเจกต์คุณ</li>
+                      <li>ไปที่แถบเมนู <strong>Build > Authentication</strong> ในเมนูด้านซ้าย</li>
+                      <li>คลิกเลือกแท็บ <strong>Settings</strong> ด้านบนของหน้าจอ</li>
+                      <li>คลิกเลือกเมนูย่อย <strong>Authorized domains</strong> และกดปุ่ม <strong>Add domain</strong></li>
+                      <li>คัดลอกโดแมนต่อไปนี้ลงในฟิลด์เพื่อรับรองสิทธิ์:</li>
+                    </ol>
+                    <div class="bg-slate-800 text-slate-100 p-2.5 rounded-lg font-mono text-[10px] break-all select-all leading-tight">
+                      localhost<br/>
+                      ais-dev-j3z544l2rahfuh6vzuix2s-542200585091.asia-east1.run.app<br/>
+                      ais-pre-j3z544l2rahfuh6vzuix2s-542200585091.asia-east1.run.app<br/>
+                      (รวมถึงโดเมน Vercel ของคุณเอง เช่น <strong>your-app.vercel.app</strong>)
+                    </div>
+                  </div>
+
+                  <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 mt-2.5">
+                    <p class="font-bold text-amber-900 flex items-center gap-1">💡 ปัญหา Browser Sandbox (COOP) ใน AI Studio:</p>
+                    <p class="text-[11px] text-amber-800">เพื่อแก้ปัญหา Sandbox Iframe บล็อคหน้าต่างป็อปอัป ให้คลิกปุ่ม <strong>"Open in New Tab" (เปิดในแท็บใหม่)</strong> มุมขวาบนพรีวิวแผงแชต เพื่อเข้าใช้งานในหน้าต่างเดี่ยว จะทำให้ Google Login สำเร็จได้อย่างราบรื่นครับ</p>
+                  </div>
+                </div>
+              `,
+              confirmButtonText: 'เข้าอกเข้าใจวิธีแก้ไข',
+              confirmButtonColor: '#9333ea',
+              customClass: {
+                popup: 'rounded-3xl border border-rose-50 shadow-xl font-sans w-full max-w-lg',
+                confirmButton: 'rounded-xl font-sans text-xs px-5 py-2.5 font-bold',
+              }
+            });
+          } else {
+            Swal.fire({
+              icon: 'error',
+              title: 'เชื่อมต่อและเข้าสิทธิ์ล้มเหลว',
+              html: `
+                <div class="text-left font-sans text-xs space-y-2 leading-relaxed text-slate-700">
+                  <p>ไม่สามารถดำเนินการเข้าสู่ระบบด้วย Google ได้ มีความขัดข้องชั่วขณะ:</p>
+                  <p class="font-mono text-[10px] text-rose-600 bg-rose-50 p-2 rounded-lg break-words">${err?.message || err || 'Network connection / Sandbox timeout'}</p>
+                  <p class="mt-2 text-amber-600 font-bold">💡 ข้อแนะนำ:</p>
+                  <p class="text-[11px]">หากใช้งานบนแผงพรีวิว AI Studio ให้กดปุ่ม <strong>"Open in New Tab" (เปิดในแท็บใหม่)</strong> ที่มุมขวาบนของพรีวิว เพื่อความอิสระของเบราว์เซอร์ป๊อปอัพในการรับรองประวัติสิทธิ์</p>
+                </div>
+              `,
+              confirmButtonText: 'ตกลง',
+              confirmButtonColor: '#ef4444'
+            });
+          }
         });
       }
     });
