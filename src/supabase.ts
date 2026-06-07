@@ -1,16 +1,23 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Load defaults from Vite environment variables (useful for production deployment on Vercel)
-const defaultUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || '';
-const defaultAnonKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || '';
+const rawUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || '';
+const rawAnonKey = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || '';
+
+const defaultUrl = rawUrl.includes('your-project-id') ? '' : rawUrl;
+const defaultAnonKey = rawAnonKey.includes('your-anon-public-key') ? '' : rawAnonKey;
 
 let cachedClient: SupabaseClient | null = null;
 let lastUrl = '';
 let lastKey = '';
 
 export function getSupabaseClient(customUrl?: string, customAnonKey?: string): SupabaseClient | null {
-  const url = customUrl || defaultUrl;
-  const key = customAnonKey || defaultAnonKey;
+  let url = customUrl || defaultUrl;
+  let key = customAnonKey || defaultAnonKey;
+
+  // Filter out custom placeholder inputs from files
+  if (url.includes('your-project-id')) url = '';
+  if (key.includes('your-anon-public-key')) key = '';
 
   if (!url || !key) {
     return null;

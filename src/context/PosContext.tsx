@@ -143,8 +143,11 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
 
   const [settings, setSettings] = useState<StoreSettings>(() => {
-    const defaultSupUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || '';
-    const defaultSupAnon = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || '';
+    const rawSupUrl = ((import.meta as any).env?.VITE_SUPABASE_URL as string) || '';
+    const rawSupAnon = ((import.meta as any).env?.VITE_SUPABASE_ANON_KEY as string) || '';
+    
+    const defaultSupUrl = rawSupUrl.includes('your-project-id') ? '' : rawSupUrl;
+    const defaultSupAnon = rawSupAnon.includes('your-anon-public-key') ? '' : rawSupAnon;
     const defaultProvider = (defaultSupUrl && defaultSupAnon) ? 'supabase' : 'firebase';
 
     const cached = localStorage.getItem('pos_settings');
@@ -152,11 +155,14 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === 'object' && parsed.logo) {
+          const finalUrl = defaultSupUrl || parsed.supabaseUrl || '';
+          const finalAnon = defaultSupAnon || parsed.supabaseAnonKey || '';
+          const finalProvider = (finalUrl && finalAnon) ? (defaultSupUrl ? 'supabase' : parsed.dbProvider || 'supabase') : 'firebase';
           return {
-            dbProvider: defaultProvider,
-            supabaseUrl: defaultSupUrl,
-            supabaseAnonKey: defaultSupAnon,
-            ...parsed
+            ...parsed,
+            dbProvider: finalProvider,
+            supabaseUrl: finalUrl,
+            supabaseAnonKey: finalAnon
           };
         }
       } catch (e) {}
