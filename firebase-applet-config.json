@@ -1,10 +1,10 @@
 {
-  "projectId": "gen-lang-client-0953996521",
-  "appId": "1:303054416342:web:3cadcbcc3705d8cfc21c77",
-  "apiKey": "AIzaSyAMD4BKOk7lxeZLvk4TyfO3LHOcVJU9Xso",
-  "authDomain": "gen-lang-client-0953996521.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-fd707c79-07aa-460a-909a-f47ecde46fbf",
-  "storageBucket": "gen-lang-client-0953996521.firebasestorage.app",
-  "messagingSenderId": "303054416342",
+  "projectId": "pos-rosrawee",
+  "appId": "1:721536762835:web:6069e2203ba568bfa82526",
+  "apiKey": "AIzaSyB80xq2Dm-KR_F_bTWoyLsym6SCk8X-xIg",
+  "authDomain": "pos-rosrawee.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "pos-rosrawee.firebasestorage.app",
+  "messagingSenderId": "721536762835",
   "measurementId": ""
 }
