@@ -16,7 +16,7 @@ import { THEME_PRESETS } from './utils/theme';
 
 const AppContent: React.FC = () => {
   const { 
-    user, authLoading, loginWithGoogle, logout,
+    user, authLoading, loginWithCredentials, logout,
     syncStatus, triggerManualSync, seedInitialData,
     products, error, loading,
     settings, updateSettings
@@ -56,6 +56,13 @@ const AppContent: React.FC = () => {
       });
     }
   }, [settings]);
+
+  // Redirect general users if they landing on sales or settings tabs
+  React.useEffect(() => {
+    if (user?.role === 'general' && (activeTab === 'sales' || activeTab === 'settings')) {
+      setActiveTab('stock');
+    }
+  }, [user?.role, activeTab]);
 
   const theme = THEME_PRESETS[settings?.themeColor || 'purple'];
 
@@ -159,90 +166,136 @@ const AppContent: React.FC = () => {
 
   const handleLoginWithAlert = () => {
     Swal.fire({
-      title: 'เข้าสู่ระบบร้านค้าอัจฉริยะ',
+      title: 'เข้าสู่ระบบบัญชีร้านค้า',
       html: `
-        <div className="space-y-3 text-center">
-          <p className="text-slate-600 text-xs">เพื่อสำรองวิสูตร สินค้าคลัง ประวัติการเงิน และยอดขายของคุณไว้บนคลาวด์อย่างปลอดภัย ไร้กังวลแม้เปลี่ยนเครื่อง</p>
-          <div className="p-3 bg-fuchsia-50 rounded-2xl border border-fuchsia-100 flex items-center justify-center gap-1.5 mt-2.5">
-            <span className="text-fuchsia-600 font-extrabold text-xs">☁️ ระบบซิงค์อัตโนมัติ (Google Cloud Firestore)</span>
+        <div class="space-y-3 font-sans text-left mt-3">
+          <p class="text-slate-500 text-[11px] leading-relaxed mb-4">
+            กรุณาระบุ Username และ Password เพื่อเข้าสู่ระบบ (ระบบจะตรวจสอบและแบ่งระดับสิทธิ์การทำงานอย่างอัจฉริยะ)
+          </p>
+          
+          <div class="space-y-1">
+            <label class="block text-xs font-bold text-slate-700">ชื่อผู้ใช้งาน (Username)</label>
+            <input 
+              type="text" 
+              id="swal-username" 
+              class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent font-sans" 
+              placeholder="เช่น admin หรือ staff"
+              style="margin: 0; box-sizing: border-box;"
+            />
+          </div>
+          
+          <div class="space-y-1 mt-3">
+            <label class="block text-xs font-bold text-slate-700">รหัสผ่าน (Password)</label>
+            <input 
+              type="password" 
+              id="swal-password" 
+              class="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent font-sans" 
+              placeholder="กรอกรหัสผ่าน"
+              style="margin: 0; box-sizing: border-box;"
+            />
+          </div>
+
+          <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-2.5 mt-4 space-y-1 text-[10px] text-indigo-900 leading-normal">
+            <p class="font-bold flex items-center gap-1">🔑 บัญชีเข้าใช้งานที่ผ่านการอนุมัติ:</p>
+            <p>• <strong>สิทธิ์ผู้ดูแลระบบ (Admin)</strong>: User: <code class="bg-indigo-100 px-1 rounded font-bold font-mono">admin</code> | Pass: <code class="bg-indigo-100 px-1 rounded font-bold font-mono">admin1234</code></p>
+            <p>• <strong>สิทธิ์พนักงานขาย (Staff)</strong>: User: <code class="bg-indigo-100 px-1 rounded font-bold font-mono">staff</code> | Pass: <code class="bg-indigo-100 px-1 rounded font-bold font-mono">staff1234</code></p>
           </div>
         </div>
       `,
-      icon: 'info',
       showCancelButton: true,
-      confirmButtonText: '🚀 ล็อกอินด้วย Google Account',
-      cancelButtonText: 'ใช้งานแบบออฟไลน์/ผู้เยือนต่อ',
+      confirmButtonText: '⚡ ล็อกอินเข้าสู่ระบบ',
+      cancelButtonText: 'กลับ',
       confirmButtonColor: '#9333ea',
       cancelButtonColor: '#64748b',
       customClass: {
-        popup: 'rounded-3xl border border-pink-50 shadow-xl font-sans',
-        confirmButton: 'rounded-xl font-sans text-xs px-4 py-2.5 font-bold',
-        cancelButton: 'rounded-xl font-sans text-xs px-4 py-2.5 font-bold'
+        popup: 'rounded-3xl border border-indigo-50 shadow-xl font-sans w-full max-w-sm p-5',
+        confirmButton: 'rounded-xl font-sans text-xs px-4 py-2.5 font-bold cursor-pointer',
+        cancelButton: 'rounded-xl font-sans text-xs px-4 py-2.5 font-bold cursor-pointer'
+      },
+      preConfirm: () => {
+        const username = (document.getElementById('swal-username') as HTMLInputElement)?.value;
+        const password = (document.getElementById('swal-password') as HTMLInputElement)?.value;
+        
+        if (!username || !password) {
+          Swal.showValidationMessage('กรุณากรอกข้อมูลให้ครบถ้วนทั้งสองช่องค่ะ');
+          return false;
+        }
+        return { username, password };
       }
     }).then((result) => {
-      if (result.isConfirmed) {
-        loginWithGoogle().catch((err: any) => {
-          console.error("Auth failure caught in UI alert:", err);
-          const isUnauthorizedDomain = err?.code === 'auth/unauthorized-domain' || 
-                                       err?.message?.includes('auth/unauthorized-domain') ||
-                                       (err instanceof Error && err.message.includes('auth/unauthorized-domain'));
-          
-          if (isUnauthorizedDomain) {
-            Swal.fire({
-              icon: 'error',
-              title: 'โดเมนยังไม่ได้รับอนุญาต (Unauthorized Domain)',
-              html: `
-                <div class="text-left font-sans text-xs space-y-3 leading-relaxed text-slate-705">
-                  <p class="font-bold text-rose-600 text-sm">❌ ตรวจพบข้อผิดพลาดด้านความปลอดภัยโดเมนของ Firebase Auth</p>
-                  <p>ระบบตรวจพบว่าโดเมนปัจจุบันที่คุณพยายามล็อกอิน <strong>ไม่ได้บันทึกอยู่ใน รายการโดเมนที่ได้รับอนุญาต (Authorized Domains)</strong> ในหน้าการตั้งค่า Firebase Authentication ของคุณ</p>
-                  
-                  <div class="bg-slate-50 border border-slate-150 rounded-xl p-3 space-y-2 mt-2">
-                    <p class="font-bold text-slate-800">🛠️ วิธีแก้ไขความปลอดภัยบน Firebase Console:</p>
-                    <ol class="list-decimal pl-4 space-y-1 text-[11px] text-slate-700">
-                      <li>เปิด <strong>Firebase Console</strong> ของโปรเจกต์คุณ</li>
-                      <li>ไปที่แถบเมนู <strong>Build > Authentication</strong> ในเมนูด้านซ้าย</li>
-                      <li>คลิกเลือกแท็บ <strong>Settings</strong> ด้านบนของหน้าจอ</li>
-                      <li>คลิกเลือกเมนูย่อย <strong>Authorized domains</strong> และกดปุ่ม <strong>Add domain</strong></li>
-                      <li>คัดลอกโดแมนต่อไปนี้ลงในฟิลด์เพื่อรับรองสิทธิ์:</li>
-                    </ol>
-                    <div class="bg-slate-800 text-slate-100 p-2.5 rounded-lg font-mono text-[10px] break-all select-all leading-tight">
-                      localhost<br/>
-                      ais-dev-j3z544l2rahfuh6vzuix2s-542200585091.asia-east1.run.app<br/>
-                      ais-pre-j3z544l2rahfuh6vzuix2s-542200585091.asia-east1.run.app<br/>
-                      (รวมถึงโดเมน Vercel ของคุณเอง เช่น <strong>your-app.vercel.app</strong>)
-                    </div>
-                  </div>
-
-                  <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 mt-2.5">
-                    <p class="font-bold text-amber-900 flex items-center gap-1">💡 ปัญหา Browser Sandbox (COOP) ใน AI Studio:</p>
-                    <p class="text-[11px] text-amber-800">เพื่อแก้ปัญหา Sandbox Iframe บล็อคหน้าต่างป็อปอัป ให้คลิกปุ่ม <strong>"Open in New Tab" (เปิดในแท็บใหม่)</strong> มุมขวาบนพรีวิวแผงแชต เพื่อเข้าใช้งานในหน้าต่างเดี่ยว จะทำให้ Google Login สำเร็จได้อย่างราบรื่นครับ</p>
-                  </div>
-                </div>
-              `,
-              confirmButtonText: 'เข้าอกเข้าใจวิธีแก้ไข',
-              confirmButtonColor: '#9333ea',
-              customClass: {
-                popup: 'rounded-3xl border border-rose-50 shadow-xl font-sans w-full max-w-lg',
-                confirmButton: 'rounded-xl font-sans text-xs px-5 py-2.5 font-bold',
-              }
-            });
-          } else {
-            Swal.fire({
-              icon: 'error',
-              title: 'เชื่อมต่อและเข้าสิทธิ์ล้มเหลว',
-              html: `
-                <div class="text-left font-sans text-xs space-y-2 leading-relaxed text-slate-700">
-                  <p>ไม่สามารถดำเนินการเข้าสู่ระบบด้วย Google ได้ มีความขัดข้องชั่วขณะ:</p>
-                  <p class="font-mono text-[10px] text-rose-600 bg-rose-50 p-2 rounded-lg break-words">${err?.message || err || 'Network connection / Sandbox timeout'}</p>
-                  <p class="mt-2 text-amber-600 font-bold">💡 ข้อแนะนำ:</p>
-                  <p class="text-[11px]">หากใช้งานบนแผงพรีวิว AI Studio ให้กดปุ่ม <strong>"Open in New Tab" (เปิดในแท็บใหม่)</strong> ที่มุมขวาบนของพรีวิว เพื่อความอิสระของเบราว์เซอร์ป๊อปอัพในการรับรองประวัติสิทธิ์</p>
-                </div>
-              `,
-              confirmButtonText: 'ตกลง',
-              confirmButtonColor: '#ef4444'
-            });
+      if (result.isConfirmed && result.value) {
+        const { username, password } = result.value;
+        
+        Swal.fire({
+          title: 'กำลังตรวจสอบข้อมูล...',
+          allowOutsideClick: false,
+          didOpen: () => {
+            Swal.showLoading();
           }
         });
+
+        loginWithCredentials(username, password)
+          .then(() => {
+            Swal.fire({
+              icon: 'success',
+              title: 'เข้าสู่ระบบสำเร็จ',
+              text: `ยินดีต้อนรับกลับเข้าสู่ระบบระบบพอยต์ออฟเซลล์เรียบร้อย!`,
+              confirmButtonColor: '#9333ea',
+              timer: 2000,
+              showConfirmButton: false
+            });
+          })
+          .catch((err) => {
+            const isMissingTable = err?.message?.includes('relation') || 
+                                  err?.message?.includes('users') ||
+                                  err?.message?.includes('ตาราง \'users\'');
+
+            if (isMissingTable && settings.dbProvider === 'supabase') {
+              Swal.fire({
+                icon: 'warning',
+                title: 'ไม่พบตาราง users ใน Supabase',
+                html: `
+                  <div class="text-left font-sans text-[11px] space-y-3 leading-relaxed">
+                    <p class="text-rose-600 font-bold text-xs">⚠️ กรุณาสร้างตาราง "users" ในระบบ Supabase ของคุณก่อนค่ะ</p>
+                    <p>ระบบตรวจไม่พบตารางข้อมูลพนักงาน/แอดมิน เพื่อแก้ปัญหานี้ กรุณาคัดลอกโค้ด SQL ด้านล่างนี้ไปกดรันในเมนู <strong>SQL Editor (SQL Web Terminal)</strong> บนแดชบอร์ด Supabase ของคุณ:</p>
+                    
+                    <div class="bg-slate-900 text-slate-200 p-3 rounded-xl font-mono text-[10px] max-h-[160px] overflow-y-auto select-all leading-normal whitespace-pre">-- 1. สร้างตาราง users
+CREATE TABLE IF NOT EXISTS public.users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  username TEXT NOT NULL UNIQUE,
+  password TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'general',
+  display_name TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 2. เพิ่มบัญชีเพื่อใช้เข้าสู่ระบบ
+INSERT INTO public.users (username, password, role, display_name)
+VALUES 
+  ('admin', 'admin1234', 'admin', 'ผู้ดูแลระบบ (Admin)'),
+  ('staff', 'staff1234', 'general', 'พนักงานขาย (Staff)')
+ON CONFLICT (username) DO NOTHING;</div>
+                    
+                    <p class="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2 mt-2 leading-tight">💡 <em>คำแนะนำ:</em> หลังจากสั่งรัน (Run) คำสั่ง SQL ในช่อง SQL Editor เรียบร้อยแล้ว ท่านสามารถกลับมากรอกรหัสผ่านเพื่อทดลองล็อกอินเข้าใช้งานระบบได้ทันทีค่ะ!</p>
+                  </div>
+                `,
+                confirmButtonText: 'เข้าใจแล้วและคัดลอกรหัส SQL',
+                confirmButtonColor: '#9333ea',
+                customClass: {
+                  popup: 'rounded-3xl border border-rose-50 shadow-xl font-sans w-full max-w-lg p-5',
+                  confirmButton: 'rounded-xl font-sans text-xs px-5 py-2.5 font-bold cursor-pointer',
+                }
+              });
+            } else {
+              Swal.fire({
+                icon: 'error',
+                title: 'การยืนยันตัวตนล้มเหลว',
+                text: err?.message || 'ชื่อผู้ใช้หรือรหัสผ่านผิดพลาด',
+                confirmButtonText: 'ลองอีกครั้ง',
+                confirmButtonColor: '#ef4444'
+              });
+            }
+          });
       }
     });
   };
@@ -593,18 +646,33 @@ const AppContent: React.FC = () => {
 
               {/* 3. Sales ledger audit reports */}
               <button
-                onClick={() => setActiveTab('sales')}
+                onClick={() => {
+                  if (user?.role === 'general') {
+                    Swal.fire({
+                      icon: 'warning',
+                      title: 'จำกัดสิทธิ์การเข้าถึง',
+                      text: 'รายงานประวัติการขายและธุรกรรมทางการเงินสามารถเข้าถึงได้เฉพาะสิทธิ์ผู้ดูแลระบบ (Admin) เท่านั้นค่ะ',
+                      confirmButtonColor: '#9333ea',
+                    });
+                    return;
+                  }
+                  setActiveTab('sales');
+                }}
                 className={`w-full py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
                   activeTab === 'sales' 
                     ? 'bg-purple-600 text-white shadow-md font-extrabold' 
                     : 'text-slate-400 hover:bg-slate-800/80 hover:text-white'
-                }`}
+                } ${user?.role === 'general' ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 <span className="flex items-center gap-2">
                   <History className="w-4 h-4 shrink-0 text-purple-400" />
                   <span>รายงานธุรกรรมการเงิน</span>
                 </span>
-                <span className="text-[8px] font-mono bg-slate-800 text-slate-400 px-1 py-0.5 rounded-sm select-none">F4</span>
+                {user?.role === 'general' ? (
+                  <span className="text-[10px]" title="เฉพาะแอดมิน">🔒</span>
+                ) : (
+                  <span className="text-[8px] font-mono bg-slate-800 text-slate-400 px-1 py-0.5 rounded-sm select-none">F4</span>
+                )}
               </button>
 
               <div className="pt-4 text-[9px] uppercase tracking-widest text-slate-500 font-bold px-3 py-1.5 select-none font-mono">
@@ -613,18 +681,33 @@ const AppContent: React.FC = () => {
 
               {/* 4. Brand customizer tab */}
               <button
-                onClick={() => setActiveTab('settings')}
+                onClick={() => {
+                  if (user?.role === 'general') {
+                    Swal.fire({
+                      icon: 'warning',
+                      title: 'จำกัดสิทธิ์การเข้าถึง',
+                      text: 'การปรับเปลี่ยนการตั้งค่าแบรนด์ บัญชี และฐานข้อมูลสงวนไว้เฉพาะสิทธิ์ผู้ดูแลระบบ (Admin) เท่านั้นค่ะ',
+                      confirmButtonColor: '#9333ea',
+                    });
+                    return;
+                  }
+                  setActiveTab('settings');
+                }}
                 className={`w-full py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
                   activeTab === 'settings' 
                     ? 'bg-purple-600 text-white shadow-md font-extrabold' 
                     : 'text-slate-400 hover:bg-slate-800/80 hover:text-white'
-                }`}
+                } ${user?.role === 'general' ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 <span className="flex items-center gap-2">
                   <Palette className="w-4 h-4 shrink-0 text-purple-400" />
                   <span>ตั้งค่าแบรนด์ & รับเงิน</span>
                 </span>
-                <span className="text-[8px] text-slate-500 font-serif">⚙️</span>
+                {user?.role === 'general' ? (
+                  <span className="text-[10px]" title="เฉพาะแอดมิน">🔒</span>
+                ) : (
+                  <span className="text-[8px] text-slate-500 font-serif">⚙️</span>
+                )}
               </button>
 
             </nav>

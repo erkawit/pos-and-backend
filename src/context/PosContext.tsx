@@ -11,12 +11,11 @@ import {
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
-  signOut,
-  User
+  signOut
 } from 'firebase/auth';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../firebase';
 import { getSupabaseClient } from '../supabase';
-import { Product, Unit, Member, MemberCard, Sale, CartItem, SyncStatus, SaleItem, StoreSettings } from '../types';
+import { Product, Unit, Member, MemberCard, Sale, CartItem, SyncStatus, SaleItem, StoreSettings, AppUser } from '../types';
 import { 
   generateInvoiceId, 
   generateUUID, 
@@ -26,9 +25,9 @@ import {
 } from '../utils/generators';
 
 interface PosContextType {
-  user: User | null;
+  user: AppUser | null;
   authLoading: boolean;
-  loginWithGoogle: () => Promise<void>;
+  loginWithCredentials: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   
   products: Product[];
@@ -84,7 +83,7 @@ export const usePos = () => {
 };
 
 export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AppUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -293,8 +292,27 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  const getRoleFromEmail = (email?: string | null): 'admin' | 'general' => {
+    if (!email) return 'general';
+    const cleanEmail = email.toLowerCase();
+    if (cleanEmail.includes('admin')) return 'admin';
+    return 'general';
+  };
+
   // Monitor Auth Status
   useEffect(() => {
+    const savedUserStr = localStorage.getItem('pos_current_user');
+    if (savedUserStr) {
+      try {
+        const savedUser = JSON.parse(savedUserStr);
+        setUser(savedUser);
+        setAuthLoading(false);
+        return;
+      } catch (e) {
+        console.warn("Could not load local session:", e);
+      }
+    }
+
     if (settings.dbProvider === 'supabase') {
       const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
       if (!sbClient) {
@@ -306,12 +324,15 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sbClient.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
           const u = session.user;
-          setUser({
+          const sessionUser: AppUser = {
             uid: u.id,
             email: u.email || '',
-            displayName: u.user_metadata?.full_name || u.email?.substring(0, u.email.indexOf('@')) || 'Supabase User',
+            displayName: u.user_metadata?.full_name || (u.email?.toLowerCase().includes('admin') ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)'),
             photoURL: u.user_metadata?.avatar_url || '',
-          } as any);
+            role: getRoleFromEmail(u.email)
+          };
+          setUser(sessionUser);
+          localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
         } else {
           setUser(null);
         }
@@ -321,21 +342,40 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const { data: { subscription } } = sbClient.auth.onAuthStateChange((event, session) => {
         if (session?.user) {
           const u = session.user;
-          setUser({
+          const sessionUser: AppUser = {
             uid: u.id,
             email: u.email || '',
-            displayName: u.user_metadata?.full_name || u.email?.substring(0, u.email.indexOf('@')) || 'Supabase User',
+            displayName: u.user_metadata?.full_name || (u.email?.toLowerCase().includes('admin') ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)'),
             photoURL: u.user_metadata?.avatar_url || '',
-          } as any);
+            role: getRoleFromEmail(u.email)
+          };
+          setUser(sessionUser);
+          localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
         } else {
-          setUser(null);
+          if (!localStorage.getItem('pos_current_user')) {
+            setUser(null);
+          }
         }
         setAuthLoading(false);
       });
       return () => subscription.unsubscribe();
     } else {
       const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-        setUser(firebaseUser);
+        if (firebaseUser) {
+          const sessionUser: AppUser = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            displayName: firebaseUser.displayName || (firebaseUser.email?.toLowerCase().includes('admin') ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)'),
+            photoURL: firebaseUser.photoURL || '',
+            role: getRoleFromEmail(firebaseUser.email)
+          };
+          setUser(sessionUser);
+          localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
+        } else {
+          if (!localStorage.getItem('pos_current_user')) {
+            setUser(null);
+          }
+        }
         setAuthLoading(false);
       });
       return unsubscribe;
@@ -617,27 +657,150 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [syncStatus.isConnected, user, syncStatus.pendingCount]);
 
   // Auth operators
-  const loginWithGoogle = async () => {
+  const loginWithCredentials = async (usernameInput: string, passwordInput: string) => {
     try {
       setAuthLoading(true);
+      setError(null);
+
+      const trimmedUser = usernameInput.trim().toLowerCase();
+      const trimmedPass = passwordInput.trim();
+
+      if (!trimmedUser || !trimmedPass) {
+        throw new Error("กรุณาระบุชื่อผู้ใช้งานและรหัสผ่าน");
+      }
+
+      // Format clean deterministic emails
+      let email = '';
+      if (trimmedUser === 'admin') {
+        email = 'admin@pos.com';
+      } else if (trimmedUser === 'staff' || trimmedUser === 'cashier') {
+        email = 'staff@pos.com';
+      } else if (trimmedUser.includes('@')) {
+        email = trimmedUser;
+      } else {
+        email = `${trimmedUser}@pos.com`;
+      }
+
+      const isDefaultAdmin = trimmedUser === 'admin' && trimmedPass === 'admin1234';
+      const isDefaultStaff = (trimmedUser === 'staff' || trimmedUser === 'cashier') && trimmedPass === 'staff1234';
+
+      if (trimmedUser === 'admin' && trimmedPass !== 'admin1234') {
+        throw new Error("รหัสผ่านสำหรับสิทธิ์ผู้ดูแลระบบ (Admin) ไม่ถูกต้อง (รหัสผ่านคือ admin1234)");
+      }
+      if ((trimmedUser === 'staff' || trimmedUser === 'cashier') && trimmedPass !== 'staff1234') {
+        throw new Error("รหัสผ่านสำหรับสิทธิ์พนักงานทั่วไป (Staff) ไม่ถูกต้อง (รหัสผ่านคือ staff1234)");
+      }
+
+      if (!isDefaultAdmin && !isDefaultStaff) {
+        throw new Error("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (กรุณาใช้บัญชี admin หรือ staff)");
+      }
+
       if (settings.dbProvider === 'supabase') {
         const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
         if (sbClient) {
-          await sbClient.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-              redirectTo: window.location.origin
+          // Query the custom 'users' table in Supabase
+          const { data: dbUser, error: dbError } = await sbClient
+            .from('users')
+            .select('*')
+            .eq('username', trimmedUser)
+            .maybeSingle();
+
+          if (dbError) {
+            console.error("Supabase custom users table query error:", dbError);
+            if (dbError.message.includes("relation") && dbError.message.includes("does not exist")) {
+              throw new Error("ตาราง 'users' ยังไม่มีอยู่ใน Supabase ของคุณ! กรุณาเปิด SQL Editor ในแดชบอร์ด Supabase ของคุณ เพื่อรันคำสั่งสร้างตาราง users และเพิ่มสิทธิ์ข้อมูลก่อนเริ่มล็อกอินค่ะ (ความผิดพลาด: relation users does not exist)");
             }
-          });
+            throw new Error(`เกิดข้อผิดพลาดในการดึงข้อมูลจากตาราง users ของ Supabase: ${dbError.message}`);
+          }
+
+          if (!dbUser) {
+            throw new Error(`ไม่พบชื่อผู้ใช้งาน "${trimmedUser}" ในฐานข้อมูลตาราง users บน Supabase`);
+          }
+
+          if (dbUser.password !== trimmedPass) {
+            throw new Error("รหัสผ่านไม่ถูกต้อง กรุณาป้อนใหม่อีกครั้ง");
+          }
+
+          const sessionUser: AppUser = {
+            uid: dbUser.id || `sb-${dbUser.username}`,
+            email,
+            displayName: dbUser.display_name || (dbUser.role === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)'),
+            photoURL: '',
+            role: dbUser.role === 'admin' ? 'admin' : 'general',
+          };
+
+          setUser(sessionUser);
+          localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
         } else {
-          throw new Error("โปรดป้อนค่าเซ็ตอัพ Supabase URL และ API Key ในหน้าการตั้งค่าก่อนล็อกอินผ่านระบบ Supabase ครับ");
+          // Supabase credentials not set, fallback to offline UI
+          const sessionUser: AppUser = {
+            uid: trimmedUser === 'admin' ? 'uid-admin-offline-sb' : 'uid-staff-offline-sb',
+            email,
+            displayName: trimmedUser === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)',
+            photoURL: '',
+            role: trimmedUser === 'admin' ? 'admin' : 'general',
+          };
+          setUser(sessionUser);
+          localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
         }
       } else {
-        await signInWithPopup(auth, googleProvider);
+        // Firebase Cloud configuration
+        const { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
+        try {
+          const res = await signInWithEmailAndPassword(auth, email, trimmedPass);
+          const sessionUser: AppUser = {
+            uid: res.user.uid,
+            email: res.user.email || email,
+            displayName: trimmedUser === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)',
+            photoURL: '',
+            role: trimmedUser === 'admin' ? 'admin' : 'general',
+          };
+          setUser(sessionUser);
+          localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
+        } catch (fbErr: any) {
+          // If user doesn't exist, auto create
+          const isUserNotFound = fbErr?.code === 'auth/user-not-found' || 
+                                 fbErr?.message?.includes('user-not-found') || 
+                                 fbErr?.code === 'auth/invalid-credential';
+                                 
+          if (isUserNotFound) {
+            try {
+              const res = await createUserWithEmailAndPassword(auth, email, trimmedPass);
+              await updateProfile(res.user, {
+                displayName: trimmedUser === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)'
+              });
+              
+              const sessionUser: AppUser = {
+                uid: res.user.uid,
+                email: res.user.email || email,
+                displayName: trimmedUser === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)',
+                photoURL: '',
+                role: trimmedUser === 'admin' ? 'admin' : 'general',
+              };
+              setUser(sessionUser);
+              localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
+            } catch (regErr) {
+              console.warn("Could not register on Firebase, fell back to offline mode for UI:", regErr);
+              // Safe offline sandbox mock
+              const sessionUser: AppUser = {
+                uid: trimmedUser === 'admin' ? 'uid-admin-offline-fb' : 'uid-staff-offline-fb',
+                email,
+                displayName: trimmedUser === 'admin' ? 'ผู้ดูแลระบบ (Admin)' : 'พนักงานขาย (Staff)',
+                photoURL: '',
+                role: trimmedUser === 'admin' ? 'admin' : 'general',
+              };
+              setUser(sessionUser);
+              localStorage.setItem('pos_current_user', JSON.stringify(sessionUser));
+            }
+          } else {
+            throw fbErr;
+          }
+        }
       }
-    } catch (err) {
-      console.error("Login fail in provider context:", err);
-      setError("ไม่สามารถเข้าสู่ระบบผ่าน Google ได้");
+    } catch (err: any) {
+      console.error("Login failed:", err);
+      const errMsg = err?.message || "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";
+      setError(errMsg);
       throw err;
     } finally {
       setAuthLoading(false);
@@ -646,6 +809,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = async () => {
     try {
+      localStorage.removeItem('pos_current_user');
       if (settings.dbProvider === 'supabase') {
         const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
         if (sbClient) {
@@ -661,6 +825,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setProducts(SEED_PRODUCTS);
       setUnits(SEED_UNITS);
       setMembers(SEED_MEMBERS);
+      setUser(null);
     } catch (err) {
       console.error("Logout fail:", err);
     }
@@ -1649,7 +1814,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <PosContext.Provider value={{
       user,
       authLoading,
-      loginWithGoogle,
+      loginWithCredentials,
       logout,
       
       products,

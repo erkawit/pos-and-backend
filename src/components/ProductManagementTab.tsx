@@ -14,8 +14,17 @@ import { promptNumpad } from '../utils/thaiNumpad';
 export const ProductManagementTab: React.FC = () => {
   const { 
     products, units, addProduct, updateProduct, deleteProduct,
-    addUnit, updateUnit, deleteUnit 
+    addUnit, updateUnit, deleteUnit, user 
   } = usePos();
+
+  const alertAdminRequired = (actionName: string) => {
+    Swal.fire({
+      icon: 'warning',
+      title: 'จำกัดสิทธิ์การเข้าถึง',
+      text: `คุณไม่สามารถ${actionName}ได้ เนื่องจากสิทธิ์ของพนักงานขาย (Staff) ไม่ได้รับอนุญาตให้แก้ไขสต็อกและคลังสินค้า จำเป็นต้องลงชื่อเข้าใช้ด้วยบัญชีแอดมินเท่านั้นค่ะ`,
+      confirmButtonColor: '#9333ea',
+    });
+  };
 
   const [search, setSearch] = useState('');
   const [selectedSubTab, setSelectedSubTab] = useState<'all' | 'low-stock'>('all');
@@ -153,6 +162,10 @@ export const ProductManagementTab: React.FC = () => {
   };
 
   const openAddProductModal = () => {
+    if (user?.role === 'general') {
+      alertAdminRequired('เพิ่มสินค้าใหม่');
+      return;
+    }
     setCurrentProduct(null);
     setName('');
     setBarcode('');
@@ -169,6 +182,10 @@ export const ProductManagementTab: React.FC = () => {
   };
 
   const openEditProductModal = (p: Product) => {
+    if (user?.role === 'general') {
+      alertAdminRequired('แก้ไขสินค้า');
+      return;
+    }
     setCurrentProduct(p);
     setName(p.name);
     setBarcode(p.barcode || '');
@@ -240,6 +257,10 @@ export const ProductManagementTab: React.FC = () => {
   };
 
   const handleDeleteProduct = async (id: string, nameName: string) => {
+    if (user?.role === 'general') {
+      alertAdminRequired('ลบสินค้า');
+      return;
+    }
     Swal.fire({
       title: 'ยืนยันการลบสินค้า?',
       text: `คุณแน่ใจหรือไม่ที่จะทำการลบสินค้า: "${nameName}" ออกจากคลังสินค้าถาวร?`,
@@ -375,7 +396,13 @@ export const ProductManagementTab: React.FC = () => {
         <div className="flex gap-2">
           
           <button
-            onClick={() => setIsManagingUnits(true)}
+            onClick={() => {
+              if (user?.role === 'general') {
+                alertAdminRequired('จัดการหน่วยนับ');
+                return;
+              }
+              setIsManagingUnits(true);
+            }}
             className="py-2 px-4 border border-pink-100 text-slate-600 hover:bg-pink-50/35 rounded-xl text-xs font-medium transition-all flex items-center gap-2 cursor-pointer"
           >
             <Layers className="w-4 h-4 text-purple-400" />

@@ -90,3 +90,12 @@ export interface StoreSettings {
   supabaseAnonKey?: string;
 }
 
+export interface AppUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  role: 'admin' | 'general';
+}
+
+
