@@ -1,0 +1,260 @@
+{
+  "entities": {
+    "Unit": {
+      "title": "Unit",
+      "description": "Measurement unit definition",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the measurement unit"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["id", "name"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Retail product / stock material",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Product name"
+        },
+        "barcode": {
+          "type": "string",
+          "description": "Barcode or SKU identifier"
+        },
+        "price": {
+          "type": "number",
+          "description": "Selling price per unit"
+        },
+        "cost": {
+          "type": "number",
+          "description": "Cost price per unit"
+        },
+        "stock": {
+          "type": "number",
+          "description": "Current stock quantity"
+        },
+        "safetyStock": {
+          "type": "number",
+          "description": "Safety threshold for low stock alert"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Unit name or ID"
+        },
+        "image": {
+          "type": "string",
+          "description": "Product image base64 data URL or URL"
+        },
+        "category": {
+          "type": "string",
+          "description": "Product category"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["id", "name", "price", "cost", "stock", "unit"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "Loyalty customer membership info",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Member name"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Phone number"
+        },
+        "points": {
+          "type": "number",
+          "description": "Accumulated points balance"
+        },
+        "memberCode": {
+          "type": "string",
+          "description": "Unique 5-digit membership code"
+        },
+        "birthday": {
+          "type": "string",
+          "description": "Member date of birth (YYYY-MM-DD)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Membership registration timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["id", "name", "phone", "points"]
+    },
+    "MemberCard": {
+      "title": "MemberCard",
+      "description": "Loyalty physical/virtual serial sequential card codes",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Card document ID (same as code)"
+        },
+        "code": {
+          "type": "string",
+          "description": "Unique card code e.g. RF-10001"
+        },
+        "status": {
+          "type": "string",
+          "description": "Card assignment status: available, assigned"
+        },
+        "assignedToMemberId": {
+          "type": "string",
+          "description": "Assigned loyalty customer ID"
+        },
+        "assignedToMemberName": {
+          "type": "string",
+          "description": "Assigned loyalty customer name"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Card creation timestamp"
+        }
+      },
+      "required": ["id", "code", "status", "createdAt"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Daily store sale financial document",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier"
+        },
+        "invoiceId": {
+          "type": "string",
+          "description": "Auto-generated invoice sequence number"
+        },
+        "date": {
+          "type": "string",
+          "description": "String date in YYYY-MM-DD"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record timestamp"
+        },
+        "items": {
+          "type": "array",
+          "description": "Serialized list of sold items"
+        },
+        "totalAmount": {
+          "type": "number",
+          "description": "Total payment amount"
+        },
+        "cashReceived": {
+          "type": "number",
+          "description": "Cash handed by customer"
+        },
+        "change": {
+          "type": "number",
+          "description": "Change returned to customer"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Payment method: Cash or QR Code"
+        },
+        "pointsEarned": {
+          "type": "number",
+          "description": "Points earned from this transaction"
+        },
+        "memberId": {
+          "type": "string",
+          "description": "Optional membership reference ID"
+        },
+        "memberName": {
+          "type": "string",
+          "description": "Optional member name copied at time of sale"
+        }
+      },
+      "required": ["id", "invoiceId", "date", "items", "totalAmount"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Custom store metadata: name, themes, and logos",
+      "type": "object",
+      "properties": {
+        "logo": {
+          "type": "string",
+          "description": "URL, emoji, or base64 data for store logo"
+        },
+        "nameEng": {
+          "type": "string",
+          "description": "Store name in English"
+        },
+        "nameThai": {
+          "type": "string",
+          "description": "Store name in Thai"
+        },
+        "themeColor": {
+          "type": "string",
+          "description": "The current pastel color theme option"
+        }
+      },
+      "required": ["logo", "nameEng", "nameThai", "themeColor"]
+    }
+  },
+  "firestore": {
+    "units/{unitId}": {
+      "schema": "Unit",
+      "description": "Measurement units for product inventory"
+    },
+    "products/{productId}": {
+      "schema": "Product",
+      "description": "Product catalog and inventory stock"
+    },
+    "members/{memberId}": {
+      "schema": "Member",
+      "description": "Registered loyal store members"
+    },
+    "memberCards/{cardId}": {
+      "schema": "MemberCard",
+      "description": "Generated sequential numbering member cards pool"
+    },
+    "sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Completed transactions and financial bills"
+    },
+    "settings/{settingsId}": {
+      "schema": "StoreSettings",
+      "description": "System-wide brand, title, and theme options"
+    }
+  }
+}

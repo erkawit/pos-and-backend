@@ -1,0 +1,6 @@
+{
+  "name": "Thai Store & Stock POS",
+  "description": "ระบบจัดการร้านค้าครบวงจร (POS) เครื่องมือขายสินค้าหน้าร้าน, ระบบควบคุมสต็อกและหน่วยนับ, สแกน QR Code เพื่อชำระเงิน, งานสมาชิกสะสมแต้ม และระบบจัดการคลังและรายงานยอดขายประสิทธิภาพสูง ทำงานแบบ Offline-First",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
