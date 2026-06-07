@@ -16,10 +16,8 @@ export function getSupabaseClient(customUrl?: string, customAnonKey?: string): S
   let key = customAnonKey || defaultAnonKey;
 
   // Filter out custom placeholder inputs from files
-  if (url.includes('https://gstlprqiihywumsydhhl.supabase.co')) url = '';
-  if (key.includes('sb_publishable___fo8taW3ECQgR-iIG6vew_JZ8Bwooy')) key = '';
-  // if (url.includes('your-project-id')) url = '';
-  // if (key.includes('your-anon-public-key')) key = '';
+  if (url.includes('your-project-id')) url = 'https://gstlprqiihywumsydhhl.supabase.co';
+  if (key.includes('your-anon-public-key')) key = 'sb_publishable___fo8taW3ECQgR-iIG6vew_JZ8Bwooy';
 
   if (!url || !key) {
     return null;
