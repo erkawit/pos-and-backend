@@ -85,5 +85,8 @@ export interface StoreSettings {
   themeColor: 'purple' | 'pink' | 'blue' | 'emerald' | 'orange';
   promptPayId?: string;
   trueMoneyPhone?: string;
+  dbProvider?: 'firebase' | 'supabase';
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
 }
 

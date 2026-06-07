@@ -15,6 +15,7 @@ import {
   User
 } from 'firebase/auth';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../firebase';
+import { getSupabaseClient } from '../supabase';
 import { Product, Unit, Member, MemberCard, Sale, CartItem, SyncStatus, SaleItem, StoreSettings } from '../types';
 import { 
   generateInvoiceId, 
@@ -294,14 +295,54 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Monitor Auth Status
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setAuthLoading(false);
-    });
-    return unsubscribe;
-  }, []);
+    if (settings.dbProvider === 'supabase') {
+      const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+      if (!sbClient) {
+        setUser(null);
+        setAuthLoading(false);
+        return;
+      }
 
-  // Sync / Fetch data dynamically from Firebase if user is authenticated
+      sbClient.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          const u = session.user;
+          setUser({
+            uid: u.id,
+            email: u.email || '',
+            displayName: u.user_metadata?.full_name || u.email?.substring(0, u.email.indexOf('@')) || 'Supabase User',
+            photoURL: u.user_metadata?.avatar_url || '',
+          } as any);
+        } else {
+          setUser(null);
+        }
+        setAuthLoading(false);
+      });
+
+      const { data: { subscription } } = sbClient.auth.onAuthStateChange((event, session) => {
+        if (session?.user) {
+          const u = session.user;
+          setUser({
+            uid: u.id,
+            email: u.email || '',
+            displayName: u.user_metadata?.full_name || u.email?.substring(0, u.email.indexOf('@')) || 'Supabase User',
+            photoURL: u.user_metadata?.avatar_url || '',
+          } as any);
+        } else {
+          setUser(null);
+        }
+        setAuthLoading(false);
+      });
+      return () => subscription.unsubscribe();
+    } else {
+      const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+        setUser(firebaseUser);
+        setAuthLoading(false);
+      });
+      return unsubscribe;
+    }
+  }, [settings.dbProvider, settings.supabaseUrl, settings.supabaseAnonKey]);
+
+  // Sync / Fetch data dynamically from Firebase or Supabase if user is authenticated
   useEffect(() => {
     if (!user) {
       setLoading(false);
@@ -309,117 +350,258 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     setLoading(true);
-    let unsubProducts = () => {};
-    let unsubUnits = () => {};
-    let unsubMembers = () => {};
-    let unsubMemberCards = () => {};
-    let unsubSales = () => {};
-    let unsubSettings = () => {};
 
-    try {
-      // 1. Subscribe to Products
-      unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-        const prodList: Product[] = [];
-        snapshot.forEach((doc) => {
-          prodList.push({ id: doc.id, ...doc.data() } as Product);
-        });
-        // If there are standard seeds but DB is empty, we will handle that later.
-        // If snapshot has items, update state
-        if (prodList.length > 0) {
-          setProducts(prodList);
-        }
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'products');
-      });
-
-      // 2. Subscribe to Units
-      unsubUnits = onSnapshot(collection(db, 'units'), (snapshot) => {
-        const unitList: Unit[] = [];
-        snapshot.forEach((doc) => {
-          unitList.push({ id: doc.id, ...doc.data() } as Unit);
-        });
-        if (unitList.length > 0) {
-          setUnits(unitList);
-        }
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'units');
-      });
-
-      // 3. Subscribe to Members
-      unsubMembers = onSnapshot(collection(db, 'members'), (snapshot) => {
-        const memberList: Member[] = [];
-        snapshot.forEach((doc) => {
-          memberList.push({ id: doc.id, ...doc.data() } as Member);
-        });
-        if (memberList.length > 0) {
-          setMembers(memberList);
-        }
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'members');
-      });
-
-      // 3.5. Subscribe to Member Cards
-      unsubMemberCards = onSnapshot(collection(db, 'memberCards'), (snapshot) => {
-        const cardList: MemberCard[] = [];
-        snapshot.forEach((doc) => {
-          cardList.push({ id: doc.id, ...doc.data() } as MemberCard);
-        });
-        if (cardList.length > 0) {
-          setMemberCards(cardList);
-        }
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'memberCards');
-      });
-
-      // 4. Subscribe to Sales History
-      unsubSales = onSnapshot(collection(db, 'sales'), (snapshot) => {
-        const salesList: Sale[] = [];
-        snapshot.forEach((doc) => {
-          salesList.push({ id: doc.id, ...doc.data() } as Sale);
-        });
-        // Sort sales by timestamp descending
-        salesList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        setSales(salesList);
+    if (settings.dbProvider === 'supabase') {
+      const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+      if (!sbClient) {
         setLoading(false);
-      }, (err) => {
-        handleFirestoreError(err, OperationType.GET, 'sales');
-      });
+        return;
+      }
 
-      // 5. Subscribe to Settings
-      unsubSettings = onSnapshot(doc(db, 'settings', 'store_config'), (snapshot) => {
-        if (snapshot.exists()) {
-          const cloudSettings = snapshot.data() as StoreSettings;
-          setSettings(cloudSettings);
+      // Load all Supabase tables and subscribe
+      const loadAllSupabaseData = async () => {
+        try {
+          // Fetch products
+          const { data: pData } = await sbClient.from('products').select('*');
+          if (pData && pData.length > 0) {
+            setProducts(pData.map(p => ({
+              id: p.id,
+              name: p.name,
+              barcode: p.barcode || '',
+              price: Number(p.price || 0),
+              cost: Number(p.cost || 0),
+              stock: Number(p.stock || 0),
+              safetyStock: Number(p.safety_stock || p.safetyStock || 0),
+              unit: p.unit,
+              image: p.image || '',
+              category: p.category || '',
+              createdAt: p.created_at || p.createdAt,
+              updatedAt: p.updated_at || p.updatedAt
+            })));
+          }
+
+          // Fetch units
+          const { data: uData } = await sbClient.from('units').select('*');
+          if (uData && uData.length > 0) {
+            setUnits(uData.map(u => ({
+              id: u.id,
+              name: u.name,
+              createdAt: u.created_at || u.createdAt
+            })));
+          }
+
+          // Fetch members
+          const { data: mData } = await sbClient.from('members').select('*');
+          if (mData && mData.length > 0) {
+            setMembers(mData.map(m => ({
+              id: m.id,
+              name: m.name,
+              phone: m.phone || '',
+              points: Number(m.points || 0),
+              createdAt: m.created_at || m.createdAt,
+              updatedAt: m.updated_at || m.updatedAt || '',
+              memberCode: m.member_code || m.memberCode || '',
+              birthday: m.birthday || ''
+            })));
+          }
+
+          // Fetch member cards
+          const { data: mcData } = await sbClient.from('member_cards').select('*');
+          if (mcData && mcData.length > 0) {
+            setMemberCards(mcData.map(c => ({
+              id: c.id,
+              code: c.code,
+              status: c.status,
+              assignedToMemberId: c.assigned_to_member_id || c.assignedToMemberId || '',
+              assignedToMemberName: c.assigned_to_member_name || c.assignedToMemberName || '',
+              createdAt: c.created_at || c.createdAt
+            })));
+          }
+
+          // Fetch sales and sale items
+          const { data: sData } = await sbClient.from('sales').select('*, sale_items(*)');
+          if (sData) {
+            const salesList: Sale[] = sData.map(s => ({
+              id: s.id,
+              invoiceId: s.invoice_id || s.invoiceId,
+              date: s.date,
+              timestamp: s.timestamp,
+              totalAmount: Number(s.total_amount || s.totalAmount || 0),
+              cashReceived: Number(s.cash_received || s.cashReceived || 0),
+              change: Number(s.change || 0),
+              paymentMethod: s.payment_method || s.paymentMethod || 'Cash',
+              pointsEarned: Number(s.points_earned || s.pointsEarned || 0),
+              memberId: s.member_id || s.memberId || '',
+              memberName: s.member_name || s.memberName || '',
+              items: (s.sale_items || []).map((si: any) => ({
+                productId: si.product_id || si.productId,
+                productName: si.product_name || si.productName,
+                price: Number(si.price || 0),
+                cost: Number(si.cost || 0),
+                quantity: Number(si.quantity || 0),
+                unit: si.unit,
+                total: Number(si.total || 0)
+              })),
+              synced: true
+            }));
+            salesList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setSales(salesList);
+          }
+
+          // Fetch settings
+          const { data: setRow } = await sbClient.from('store_settings').select('*').limit(1).maybeSingle();
+          if (setRow) {
+            setSettings(prev => ({
+              ...prev,
+              logo: setRow.logo || prev.logo,
+              nameEng: setRow.name_eng || setRow.nameEng || prev.nameEng,
+              nameThai: setRow.name_thai || setRow.nameThai || prev.nameThai,
+              themeColor: setRow.theme_color || setRow.themeColor || prev.themeColor,
+              promptPayId: setRow.promptpay_id || setRow.promptPayId || prev.promptPayId,
+              trueMoneyPhone: setRow.truemoney_phone || setRow.trueMoneyPhone || prev.trueMoneyPhone
+            }));
+          }
+        } catch (err) {
+          console.error("Supabase load tables error:", err);
+        } finally {
+          setLoading(false);
         }
-      }, (err) => {
-        // Safe warning on first load if settings don't exist yet
-        console.warn("Settings fetch warning:", err);
-      });
+      };
 
-    } catch (err) {
-      console.error("Subscription Error: ", err);
-      setError("เกิดข้อผิดพลาดในการโหลดข้อมูลจากเซิร์ฟเวอร์");
-      setLoading(false);
+      loadAllSupabaseData();
+
+      const channel = sbClient
+        .channel('supabase-channel-live')
+        .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+          loadAllSupabaseData();
+        })
+        .subscribe();
+
+      return () => {
+        sbClient.removeChannel(channel);
+      };
+    } else {
+      let unsubProducts = () => {};
+      let unsubUnits = () => {};
+      let unsubMembers = () => {};
+      let unsubMemberCards = () => {};
+      let unsubSales = () => {};
+      let unsubSettings = () => {};
+
+      try {
+        unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+          const prodList: Product[] = [];
+          snapshot.forEach((doc) => {
+            prodList.push({ id: doc.id, ...doc.data() } as Product);
+          });
+          if (prodList.length > 0) {
+            setProducts(prodList);
+          }
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'products');
+        });
+
+        unsubUnits = onSnapshot(collection(db, 'units'), (snapshot) => {
+          const unitList: Unit[] = [];
+          snapshot.forEach((doc) => {
+            unitList.push({ id: doc.id, ...doc.data() } as Unit);
+          });
+          if (unitList.length > 0) {
+            setUnits(unitList);
+          }
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'units');
+        });
+
+        unsubMembers = onSnapshot(collection(db, 'members'), (snapshot) => {
+          const memberList: Member[] = [];
+          snapshot.forEach((doc) => {
+            memberList.push({ id: doc.id, ...doc.data() } as Member);
+          });
+          if (memberList.length > 0) {
+            setMembers(memberList);
+          }
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'members');
+        });
+
+        unsubMemberCards = onSnapshot(collection(db, 'memberCards'), (snapshot) => {
+          const cardList: MemberCard[] = [];
+          snapshot.forEach((doc) => {
+            cardList.push({ id: doc.id, ...doc.data() } as MemberCard);
+          });
+          if (cardList.length > 0) {
+            setMemberCards(cardList);
+          }
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'memberCards');
+        });
+
+        unsubSales = onSnapshot(collection(db, 'sales'), (snapshot) => {
+          const salesList: Sale[] = [];
+          snapshot.forEach((doc) => {
+            salesList.push({ id: doc.id, ...doc.data() } as Sale);
+          });
+          salesList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setSales(salesList);
+          setLoading(false);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.GET, 'sales');
+        });
+
+        unsubSettings = onSnapshot(doc(db, 'settings', 'store_config'), (snapshot) => {
+          if (snapshot.exists()) {
+            const cloudSettings = snapshot.data() as StoreSettings;
+            setSettings(cloudSettings);
+          }
+        }, (err) => {
+          console.warn("Settings fetch warning:", err);
+        });
+
+      } catch (err) {
+        console.error("Subscription Error: ", err);
+        setError("เกิดข้อผิดพลาดในการโหลดข้อมูลจากเซิร์ฟเวอร์");
+        setLoading(false);
+      }
+
+      return () => {
+        unsubProducts();
+        unsubUnits();
+        unsubMembers();
+        unsubMemberCards();
+        unsubSales();
+        unsubSettings();
+      };
     }
-
-    return () => {
-      unsubProducts();
-      unsubUnits();
-      unsubMembers();
-      unsubMemberCards();
-      unsubSales();
-      unsubSettings();
-    };
-  }, [user]);
+  }, [user, settings.dbProvider, settings.supabaseUrl, settings.supabaseAnonKey]);
 
   const updateSettings = async (newSettings: StoreSettings) => {
     setSettings(newSettings);
     if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'settings', 'store_config'), newSettings);
-      } catch (err) {
-        console.warn("Firebase settings update warning:", err);
-        handleFirestoreError(err, OperationType.WRITE, 'settings/store_config');
+      if (newSettings.dbProvider === 'supabase') {
+        const sbClient = getSupabaseClient(newSettings.supabaseUrl, newSettings.supabaseAnonKey);
+        if (sbClient) {
+          try {
+            await sbClient.from('store_settings').upsert({
+              id: 'settings_main',
+              logo: newSettings.logo,
+              name_eng: newSettings.nameEng,
+              name_thai: newSettings.nameThai,
+              theme_color: newSettings.themeColor,
+              promptpay_id: newSettings.promptPayId || '',
+              truemoney_phone: newSettings.trueMoneyPhone || ''
+            });
+          } catch (err) {
+            console.warn("Supabase settings update warning:", err);
+          }
+        }
+      } else {
+        try {
+          await setDoc(doc(db, 'settings', 'store_config'), newSettings);
+        } catch (err) {
+          console.warn("Firebase settings update warning:", err);
+          handleFirestoreError(err, OperationType.WRITE, 'settings/store_config');
+        }
       }
     }
   };
@@ -427,7 +609,6 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Handle automatic syncing when network comes back online
   useEffect(() => {
     if (syncStatus.isConnected && user && syncStatus.pendingCount > 0 && !syncStatus.isSyncing) {
-      // Auto trigger sync after brief delay
       const timer = setTimeout(() => {
         triggerManualSync();
       }, 3000);
@@ -439,7 +620,21 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginWithGoogle = async () => {
     try {
       setAuthLoading(true);
-      await signInWithPopup(auth, googleProvider);
+      if (settings.dbProvider === 'supabase') {
+        const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+        if (sbClient) {
+          await sbClient.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+              redirectTo: window.location.origin
+            }
+          });
+        } else {
+          throw new Error("โปรดป้อนค่าเซ็ตอัพ Supabase URL และ API Key ในหน้าการตั้งค่าก่อนล็อกอินผ่านระบบ Supabase ครับ");
+        }
+      } else {
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (err) {
       console.error("Login fail in provider context:", err);
       setError("ไม่สามารถเข้าสู่ระบบผ่าน Google ได้");
@@ -451,7 +646,14 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = async () => {
     try {
-      await signOut(auth);
+      if (settings.dbProvider === 'supabase') {
+        const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+        if (sbClient) {
+          await sbClient.auth.signOut();
+        }
+      } else {
+        await signOut(auth);
+      }
       // Empty local operational cart
       setCart([]);
       setCartMemberState(null);
@@ -505,14 +707,108 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Helper to add edit deletes queue item
-  const queueWrite = (type: 'products' | 'members' | 'units', id: string, data: any | null) => {
+  const queueWrite = (type: 'products' | 'members' | 'units' | 'memberCards', id: string, data: any | null) => {
     setPendingWrites(prev => ({
       ...prev,
       [type]: {
-        ...prev[type],
+        ...prev[type] as any,
         [id]: data
       }
     }));
+  };
+
+  // Helper to execute instant cloud writes to either Firebase or Supabase
+  const executeImmediateWrite = async (
+    collectionName: 'products' | 'units' | 'members' | 'memberCards',
+    id: string,
+    data: any | null
+  ) => {
+    if (!user || !syncStatus.isConnected) return;
+
+    if (settings.dbProvider === 'supabase') {
+      const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+      if (!sbClient) return;
+
+      try {
+        if (data === null) {
+          // Deletion
+          const tableName = collectionName === 'memberCards' ? 'member_cards' : collectionName;
+          await sbClient.from(tableName).delete().eq('id', id);
+        } else {
+          // Upsertion
+          if (collectionName === 'products') {
+            await sbClient.from('products').upsert({
+              id: data.id,
+              name: data.name,
+              barcode: data.barcode || '',
+              price: Number(data.price),
+              cost: Number(data.cost),
+              stock: Number(data.stock),
+              safety_stock: Number(data.safetyStock || 0),
+              unit: data.unit,
+              category: data.category || '',
+              image: data.image || '',
+              created_at: data.createdAt || new Date().toISOString(),
+              updated_at: data.updatedAt || new Date().toISOString()
+            });
+          } else if (collectionName === 'units') {
+            await sbClient.from('units').upsert({
+              id: data.id,
+              name: data.name,
+              created_at: data.createdAt
+            });
+          } else if (collectionName === 'members') {
+            await sbClient.from('members').upsert({
+              id: data.id,
+              name: data.name,
+              phone: data.phone || '',
+              points: Number(data.points || 0),
+              created_at: data.createdAt,
+              updated_at: data.updatedAt || new Date().toISOString(),
+              member_code: data.memberCode || '',
+              birthday: data.birthday || ''
+            });
+          } else if (collectionName === 'memberCards') {
+            await sbClient.from('member_cards').upsert({
+              id: data.id,
+              code: data.code,
+              status: data.status,
+              assigned_to_member_id: data.assignedToMemberId || null,
+              assigned_to_member_name: data.assignedToMemberName || null,
+              created_at: data.createdAt
+            });
+          }
+        }
+
+        // Successfully written to Supabase! Remove from pending queue
+        setPendingWrites(prev => {
+          const updated = { ...prev[collectionName] as any };
+          delete updated[id];
+          return { ...prev, [collectionName]: updated };
+        });
+      } catch (err) {
+        console.warn(`Direct Supabase write on ${collectionName} failed:`, err);
+      }
+    } else {
+      // Firebase standard execution
+      try {
+        const firestorePath = collectionName === 'memberCards' ? 'memberCards' : collectionName;
+        if (data === null) {
+          await deleteDoc(doc(db, firestorePath, id));
+        } else {
+          await setDoc(doc(db, firestorePath, id), data);
+        }
+
+        // Successfully written to Firestore! Remove from pending queue
+        setPendingWrites(prev => {
+          const updated = { ...prev[collectionName] as any };
+          delete updated[id];
+          return { ...prev, [collectionName]: updated };
+        });
+      } catch (err) {
+        console.warn(`Direct Firestore write on ${collectionName} failed:`, err);
+      }
+    }
   };
 
   // ==========================================
@@ -525,47 +821,16 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 1. Instantly update Local UI State (Offline-first extreme responsive)
     setProducts(prev => [newProduct, ...prev]);
 
-    // 2. Queue for Firebase synchronization
+    // 2. Queue for Firebase/Supabase synchronization
     queueWrite('products', id, newProduct);
 
     // 3. Try to push immediately
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'products', id), {
-          id: newProduct.id,
-          name: newProduct.name,
-          barcode: newProduct.barcode || '',
-          price: Number(newProduct.price),
-          cost: Number(newProduct.cost),
-          stock: Number(newProduct.stock),
-          safetyStock: Number(newProduct.safetyStock || 0),
-          unit: newProduct.unit,
-          category: newProduct.category || '',
-          image: newProduct.image || '',
-          createdAt: newProduct.createdAt
-        });
-        // Remove from pending queue on success
-        setPendingWrites(prev => {
-          const updated = { ...prev.products };
-          delete updated[id];
-          return { ...prev, products: updated };
-        });
-      } catch (err) {
-        console.warn("Direct Firestore write failed, keeping in offline pool:", err);
-      }
-    }
+    await executeImmediateWrite('products', id, newProduct);
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
     // 1. Instantly update Local UI State
-    let originalProduct: Product | undefined;
-    setProducts(prev => prev.map(p => {
-      if (p.id === id) {
-        originalProduct = p;
-        return { ...p, ...updates, updatedAt: new Date().toISOString() };
-      }
-      return p;
-    }));
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, ...updates, updatedAt: new Date().toISOString() } : p));
 
     // Find the merged product
     const updatedProduct = products.find(p => p.id === id);
@@ -575,33 +840,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 2. Queue for Sync
     queueWrite('products', id, finalProduct);
 
-    // 3. Try to write in Firestore
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'products', id), {
-          id: finalProduct.id,
-          name: finalProduct.name,
-          barcode: finalProduct.barcode || '',
-          price: Number(finalProduct.price),
-          cost: Number(finalProduct.cost),
-          stock: Number(finalProduct.stock),
-          safetyStock: Number(finalProduct.safetyStock || 0),
-          unit: finalProduct.unit,
-          category: finalProduct.category || '',
-          image: finalProduct.image || '',
-          createdAt: finalProduct.createdAt || new Date().toISOString(),
-          updatedAt: finalProduct.updatedAt
-        });
-        // Remove from queue
-        setPendingWrites(prev => {
-          const updated = { ...prev.products };
-          delete updated[id];
-          return { ...prev, products: updated };
-        });
-      } catch (err) {
-        console.warn("Direct update failed, keeping in offline pool:", err);
-      }
-    }
+    // 3. Try to write immediately
+    await executeImmediateWrite('products', id, finalProduct);
   };
 
   const deleteProduct = async (id: string) => {
@@ -611,19 +851,8 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 2. Queue for deletion
     queueWrite('products', id, null);
 
-    // 3. Sync to Firestore
-    if (user && syncStatus.isConnected) {
-      try {
-        await deleteDoc(doc(db, 'products', id));
-        setPendingWrites(prev => {
-          const updated = { ...prev.products };
-          delete updated[id];
-          return { ...prev, products: updated };
-        });
-      } catch (err) {
-        console.warn("Direct delete failed, keeping in offline pool:", err);
-      }
-    }
+    // 3. Sync to Database
+    await executeImmediateWrite('products', id, null);
   };
 
   // ==========================================
@@ -636,22 +865,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUnits(prev => [...prev, newUnit]);
     queueWrite('units', id, newUnit);
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'units', id), {
-          id: newUnit.id,
-          name: newUnit.name,
-          createdAt: newUnit.createdAt
-        });
-        setPendingWrites(prev => {
-          const updated = { ...prev.units };
-          delete updated[id];
-          return { ...prev, units: updated };
-        });
-      } catch (err) {
-        console.warn("Direct unit insert failed:", err);
-      }
-    }
+    await executeImmediateWrite('units', id, newUnit);
   };
 
   const updateUnit = async (id: string, name: string) => {
@@ -662,40 +876,14 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     queueWrite('units', id, finalUnit);
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'units', id), {
-          id: finalUnit.id,
-          name: finalUnit.name,
-          createdAt: finalUnit.createdAt
-        });
-        setPendingWrites(prev => {
-          const updated = { ...prev.units };
-          delete updated[id];
-          return { ...prev, units: updated };
-        });
-      } catch (err) {
-        console.warn("Direct unit edit failed:", err);
-      }
-    }
+    await executeImmediateWrite('units', id, finalUnit);
   };
 
   const deleteUnit = async (id: string) => {
     setUnits(prev => prev.filter(u => u.id !== id));
     queueWrite('units', id, null);
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await deleteDoc(doc(db, 'units', id));
-        setPendingWrites(prev => {
-          const updated = { ...prev.units };
-          delete updated[id];
-          return { ...prev, units: updated };
-        });
-      } catch (err) {
-        console.warn("Direct unit delete failed:", err);
-      }
-    }
+    await executeImmediateWrite('units', id, null);
   };
 
   // ==========================================
@@ -738,18 +926,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }));
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'memberCards', cardDocId), updatedCard);
-        setPendingWrites(prev => {
-          const updated = { ...(prev.memberCards || {}) };
-          delete updated[cardDocId];
-          return { ...prev, memberCards: updated };
-        });
-      } catch (err) {
-        console.warn("Direct card update failed:", err);
-      }
-    }
+    await executeImmediateWrite('memberCards', cardDocId, updatedCard);
   };
 
   const addMember = async (m: Omit<Member, 'id' | 'points' | 'createdAt'>) => {
@@ -768,26 +945,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await updateCardAssignmentState(m.memberCode, 'assigned', id, m.name);
     }
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'members', id), {
-          id: newMember.id,
-          name: newMember.name,
-          phone: newMember.phone,
-          points: Number(newMember.points),
-          createdAt: newMember.createdAt,
-          memberCode: newMember.memberCode || '',
-          birthday: newMember.birthday || ''
-        });
-        setPendingWrites(prev => {
-          const updated = { ...prev.members };
-          delete updated[id];
-          return { ...prev, members: updated };
-        });
-      } catch (err) {
-        console.warn("Direct member creation failed:", err);
-      }
-    }
+    await executeImmediateWrite('members', id, newMember);
   };
 
   const updateMember = async (id: string, updates: Partial<Member>) => {
@@ -818,27 +976,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const finalMember = { ...found, ...updates, updatedAt: new Date().toISOString() };
     queueWrite('members', id, finalMember);
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await setDoc(doc(db, 'members', id), {
-          id: finalMember.id,
-          name: finalMember.name,
-          phone: finalMember.phone,
-          points: Number(finalMember.points),
-          createdAt: finalMember.createdAt,
-          updatedAt: finalMember.updatedAt || '',
-          memberCode: finalMember.memberCode || '',
-          birthday: finalMember.birthday || ''
-        });
-        setPendingWrites(prev => {
-          const updated = { ...prev.members };
-          delete updated[id];
-          return { ...prev, members: updated };
-        });
-      } catch (err) {
-        console.warn("Direct member update failed:", err);
-      }
-    }
+    await executeImmediateWrite('members', id, finalMember);
   };
 
   const deleteMember = async (id: string) => {
@@ -850,18 +988,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMembers(prev => prev.filter(m => m.id !== id));
     queueWrite('members', id, null);
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await deleteDoc(doc(db, 'members', id));
-        setPendingWrites(prev => {
-          const updated = { ...prev.members };
-          delete updated[id];
-          return { ...prev, members: updated };
-        });
-      } catch (err) {
-        console.warn("Direct member delete failed:", err);
-      }
-    }
+    await executeImmediateWrite('members', id, null);
   };
 
   const generateMemberCards = async (count: number) => {
@@ -904,22 +1031,45 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (user && syncStatus.isConnected) {
-      try {
-        const batch = writeBatch(db);
-        newCards.forEach(c => {
-          batch.set(doc(db, 'memberCards', c.id), c);
-        });
-        await batch.commit();
-
-        setPendingWrites(prev => {
-          const updatedQueue = { ...(prev.memberCards || {}) };
+      if (settings.dbProvider === 'supabase') {
+        const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+        if (sbClient) {
+          try {
+            await sbClient.from('member_cards').insert(newCards.map(c => ({
+              id: c.id,
+              code: c.code,
+              status: c.status,
+              created_at: c.createdAt
+            })));
+            setPendingWrites(prev => {
+              const updatedQueue = { ...(prev.memberCards || {}) };
+              newCards.forEach(c => {
+                delete updatedQueue[c.id];
+              });
+              return { ...prev, memberCards: updatedQueue };
+            });
+          } catch (err) {
+            console.warn("Bulk card sync in Supabase failed:", err);
+          }
+        }
+      } else {
+        try {
+          const batch = writeBatch(db);
           newCards.forEach(c => {
-            delete updatedQueue[c.id];
+            batch.set(doc(db, 'memberCards', c.id), c);
           });
-          return { ...prev, memberCards: updatedQueue };
-        });
-      } catch (err) {
-        console.warn("Bulk card sync failed, kept in offline sync queue:", err);
+          await batch.commit();
+
+          setPendingWrites(prev => {
+            const updatedQueue = { ...(prev.memberCards || {}) };
+            newCards.forEach(c => {
+              delete updatedQueue[c.id];
+            });
+            return { ...prev, memberCards: updatedQueue };
+          });
+        } catch (err) {
+          console.warn("Bulk card sync failed, kept in offline sync queue:", err);
+        }
       }
     }
   };
@@ -935,18 +1085,7 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }));
 
-    if (user && syncStatus.isConnected) {
-      try {
-        await deleteDoc(doc(db, 'memberCards', id));
-        setPendingWrites(prev => {
-          const updated = { ...(prev.memberCards || {}) };
-          delete updated[id];
-          return { ...prev, memberCards: updated };
-        });
-      } catch (err) {
-        console.warn("Direct card delete failed:", err);
-      }
-    }
+    await executeImmediateWrite('memberCards', id, null);
   };
 
   // ==========================================
@@ -1083,62 +1222,123 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sales: [...prev.sales, newSale]
     }));
 
-    // 6. Try to write immediately to Firebase Firestore
+    // 6. Try to write immediately to database
     if (user && syncStatus.isConnected) {
-      try {
-        const saleRef = doc(db, 'sales', saleId);
-        
-        // Write transaction doc
-        await setDoc(saleRef, {
-          id: newSale.id,
-          invoiceId: newSale.invoiceId,
-          date: newSale.date,
-          timestamp: newSale.timestamp,
-          items: newSale.items,
-          totalAmount: newSale.totalAmount,
-          cashReceived: newSale.cashReceived,
-          change: newSale.change,
-          paymentMethod: newSale.paymentMethod,
-          pointsEarned: newSale.pointsEarned,
-          memberId: newSale.memberId,
-          memberName: newSale.memberName
-        });
+      if (settings.dbProvider === 'supabase') {
+        const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+        if (sbClient) {
+          try {
+            await sbClient.from('sales').insert({
+              id: newSale.id,
+              invoice_id: newSale.invoiceId,
+              date: newSale.date,
+              timestamp: newSale.timestamp,
+              total_amount: Number(newSale.totalAmount),
+              cash_received: Number(newSale.cashReceived),
+              change: Number(newSale.change),
+              payment_method: newSale.paymentMethod,
+              points_earned: Number(newSale.pointsEarned),
+              member_id: newSale.memberId || null,
+              member_name: newSale.memberName || null
+            });
 
-        // Batch update database stock and member points in Firestore synchronously
-        const batch = writeBatch(db);
+            for (const item of newSale.items) {
+              await sbClient.from('sale_items').insert({
+                id: `si-${newSale.id}-${item.productId}`,
+                sale_id: newSale.id,
+                product_id: item.productId,
+                product_name: item.productName,
+                price: Number(item.price),
+                cost: Number(item.cost),
+                quantity: Number(item.quantity),
+                unit: item.unit,
+                total: Number(item.total)
+              });
 
-        // Subtract stock in Firebase Database
-        cart.forEach(item => {
-          const prodRef = doc(db, 'products', item.product.id);
-          const currentProd = products.find(p => p.id === item.product.id);
-          if (currentProd) {
-            const freshStock = Math.max(0, currentProd.stock - item.quantity);
-            batch.update(prodRef, { stock: freshStock });
-          }
-        });
+              // Adjust stock in Supabase
+              const currentProd = products.find(p => p.id === item.productId);
+              if (currentProd) {
+                const freshStock = Math.max(0, currentProd.stock - item.quantity);
+                await sbClient.from('products').update({ stock: freshStock }).eq('id', item.productId);
+              }
+            }
 
-        // Increment user membership points in Firebase Database
-        if (cartMember) {
-          const memRef = doc(db, 'members', cartMember.id);
-          const currentMem = members.find(m => m.id === cartMember.id);
-          if (currentMem) {
-            batch.update(memRef, { points: currentMem.points + pointsEarned });
+            // Adjust member loyalty points in Supabase
+            if (cartMember) {
+              const currentMem = members.find(m => m.id === cartMember.id);
+              if (currentMem) {
+                await sbClient.from('members').update({ points: currentMem.points + pointsEarned }).eq('id', cartMember.id);
+              }
+            }
+
+            // Mark local sale as synced
+            setSales(prev => prev.map(s => s.id === saleId ? { ...s, synced: true } : s));
+
+            // Remove from pending sales sync queue
+            setPendingWrites(prev => ({
+              ...prev,
+              sales: prev.sales.filter(s => s.id !== saleId)
+            }));
+          } catch (err) {
+            console.warn("Direct Supabase sale synchronization failed:", err);
           }
         }
+      } else {
+        try {
+          const saleRef = doc(db, 'sales', saleId);
+          
+          // Write transaction doc
+          await setDoc(saleRef, {
+            id: newSale.id,
+            invoiceId: newSale.invoiceId,
+            date: newSale.date,
+            timestamp: newSale.timestamp,
+            items: newSale.items,
+            totalAmount: newSale.totalAmount,
+            cashReceived: newSale.cashReceived,
+            change: newSale.change,
+            paymentMethod: newSale.paymentMethod,
+            pointsEarned: newSale.pointsEarned,
+            memberId: newSale.memberId,
+            memberName: newSale.memberName
+          });
 
-        await batch.commit();
+          // Batch update database stock and member points in Firestore synchronously
+          const batch = writeBatch(db);
 
-        // Mark local sale as synced
-        setSales(prev => prev.map(s => s.id === saleId ? { ...s, synced: true } : s));
+          // Subtract stock in Firebase Database
+          cart.forEach(item => {
+            const prodRef = doc(db, 'products', item.product.id);
+            const currentProd = products.find(p => p.id === item.product.id);
+            if (currentProd) {
+              const freshStock = Math.max(0, currentProd.stock - item.quantity);
+              batch.update(prodRef, { stock: freshStock });
+            }
+          });
 
-        // Remove from pending sales sync queue
-        setPendingWrites(prev => ({
-          ...prev,
-          sales: prev.sales.filter(s => s.id !== saleId)
-        }));
+          // Increment user membership points in Firebase Database
+          if (cartMember) {
+            const memRef = doc(db, 'members', cartMember.id);
+            const currentMem = members.find(m => m.id === cartMember.id);
+            if (currentMem) {
+              batch.update(memRef, { points: currentMem.points + pointsEarned });
+            }
+          }
 
-      } catch (err) {
-        console.warn("Direct sale synchronization failed, kept in offline synchronization stack:", err);
+          await batch.commit();
+
+          // Mark local sale as synced
+          setSales(prev => prev.map(s => s.id === saleId ? { ...s, synced: true } : s));
+
+          // Remove from pending sales sync queue
+          setPendingWrites(prev => ({
+            ...prev,
+            sales: prev.sales.filter(s => s.id !== saleId)
+          }));
+
+        } catch (err) {
+          console.warn("Direct sale synchronization failed, kept in offline synchronization stack:", err);
+        }
       }
     }
 
@@ -1162,7 +1362,151 @@ export const PosProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setError(null);
 
     try {
-      // 1. Sync Units
+      if (settings.dbProvider === 'supabase') {
+        const sbClient = getSupabaseClient(settings.supabaseUrl, settings.supabaseAnonKey);
+        if (!sbClient) {
+          setError("ไม่สามารถซิงค์ได้เนื่องจากยังไม่ได้ตั้งค่าโปรเจกต์ Supabase");
+          setSyncStatus(prev => ({ ...prev, isSyncing: false }));
+          return;
+        }
+
+        // 1. Sync Units
+        const pendingUnitKeys = Object.keys(pendingWrites.units);
+        for (const uid of pendingUnitKeys) {
+          const uData = pendingWrites.units[uid];
+          if (uData === null) {
+            await sbClient.from('units').delete().eq('id', uid);
+          } else {
+            await sbClient.from('units').upsert({
+              id: uData.id,
+              name: uData.name,
+              created_at: uData.createdAt
+            });
+          }
+        }
+
+        // 2. Sync Products
+        const pendingProdKeys = Object.keys(pendingWrites.products);
+        for (const pid of pendingProdKeys) {
+          const pData = pendingWrites.products[pid];
+          if (pData === null) {
+            await sbClient.from('products').delete().eq('id', pid);
+          } else {
+            await sbClient.from('products').upsert({
+              id: pData.id,
+              name: pData.name,
+              barcode: pData.barcode || '',
+              price: Number(pData.price),
+              cost: Number(pData.cost),
+              stock: Number(pData.stock),
+              safety_stock: Number(pData.safetyStock || 0),
+              unit: pData.unit,
+              category: pData.category || '',
+              image: pData.image || '',
+              created_at: pData.createdAt || new Date().toISOString(),
+              updated_at: pData.updatedAt || new Date().toISOString()
+            });
+          }
+        }
+
+        // 3. Sync Members
+        const pendingMemKeys = Object.keys(pendingWrites.members);
+        for (const mid of pendingMemKeys) {
+          const mData = pendingWrites.members[mid];
+          if (mData === null) {
+            await sbClient.from('members').delete().eq('id', mid);
+          } else {
+            await sbClient.from('members').upsert({
+              id: mData.id,
+              name: mData.name,
+              phone: mData.phone || '',
+              points: Number(mData.points || 0),
+              created_at: mData.createdAt,
+              updated_at: mData.updatedAt || new Date().toISOString(),
+              member_code: mData.memberCode || '',
+              birthday: mData.birthday || ''
+            });
+          }
+        }
+
+        // 3.5. Sync Member Cards
+        const pendingCardKeys = Object.keys(pendingWrites.memberCards || {});
+        for (const cid of pendingCardKeys) {
+          const cData = pendingWrites.memberCards[cid];
+          if (cData === null) {
+            await sbClient.from('member_cards').delete().eq('id', cid);
+          } else {
+            await sbClient.from('member_cards').upsert({
+              id: cData.id,
+              code: cData.code,
+              status: cData.status,
+              assigned_to_member_id: cData.assignedToMemberId || null,
+              assigned_to_member_name: cData.assignedToMemberName || null,
+              created_at: cData.createdAt
+            });
+          }
+        }
+
+        // 4. Sync Sales History
+        const pendingSaleItems = [...pendingWrites.sales];
+        for (const sale of pendingSaleItems) {
+          await sbClient.from('sales').upsert({
+            id: sale.id,
+            invoice_id: sale.invoiceId,
+            date: sale.date,
+            timestamp: sale.timestamp,
+            total_amount: Number(sale.totalAmount),
+            cash_received: Number(sale.cashReceived),
+            change: Number(sale.change),
+            payment_method: sale.paymentMethod,
+            points_earned: Number(sale.pointsEarned),
+            member_id: sale.memberId || null,
+            member_name: sale.memberName || null
+          });
+
+          for (const item of sale.items) {
+            await sbClient.from('sale_items').upsert({
+              id: `si-${sale.id}-${item.productId}`,
+              sale_id: sale.id,
+              product_id: item.productId,
+              product_name: item.productName,
+              price: Number(item.price),
+              cost: Number(item.cost),
+              quantity: Number(item.quantity),
+              unit: item.unit,
+              total: Number(item.total)
+            });
+
+            // Adjust stock in Supabase
+            const currentProd = products.find(p => p.id === item.productId);
+            if (currentProd) {
+              await sbClient.from('products').update({ stock: currentProd.stock }).eq('id', item.productId);
+            }
+          }
+
+          if (sale.memberId) {
+            const currentMem = members.find(m => m.id === sale.memberId);
+            if (currentMem) {
+              await sbClient.from('members').update({ points: currentMem.points }).eq('id', sale.memberId);
+            }
+          }
+
+          setSales(prev => prev.map(s => s.id === sale.id ? { ...s, synced: true } : s));
+        }
+
+        setPendingWrites({ products: {}, members: {}, units: {}, memberCards: {}, sales: [] });
+        
+        const now = new Date().toLocaleTimeString('th-TH');
+        localStorage.setItem('pos_last_synced', now);
+        setSyncStatus(prev => ({
+          ...prev,
+          isSyncing: false,
+          lastSyncedAt: now
+        }));
+        return;
+      }
+
+      // 1. Sync Units (Firebase path...)
       const pendingUnitKeys = Object.keys(pendingWrites.units);
       for (const uid of pendingUnitKeys) {
         const uData = pendingWrites.units[uid];

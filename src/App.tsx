@@ -34,7 +34,10 @@ const AppContent: React.FC = () => {
     nameThai: '',
     themeColor: 'purple' as 'purple' | 'pink' | 'blue' | 'emerald' | 'orange',
     promptPayId: '',
-    trueMoneyPhone: ''
+    trueMoneyPhone: '',
+    dbProvider: 'firebase' as 'firebase' | 'supabase',
+    supabaseUrl: '',
+    supabaseAnonKey: ''
   });
 
   // Keep settings form in-sync with loaded values from localStorage/Firestore
@@ -46,7 +49,10 @@ const AppContent: React.FC = () => {
         nameThai: settings.nameThai || 'ระบบบริหารหน้าร้าน คลังพัสดุและฐานสมาชิก',
         themeColor: settings.themeColor || 'purple',
         promptPayId: settings.promptPayId || '0812345678',
-        trueMoneyPhone: settings.trueMoneyPhone || '0812345678'
+        trueMoneyPhone: settings.trueMoneyPhone || '0812345678',
+        dbProvider: settings.dbProvider || 'firebase',
+        supabaseUrl: settings.supabaseUrl || '',
+        supabaseAnonKey: settings.supabaseAnonKey || ''
       });
     }
   }, [settings]);
@@ -1045,6 +1051,66 @@ const AppContent: React.FC = () => {
                       placeholder="เช่น 0812345678"
                     />
                   </div>
+                </div>
+              </div>
+
+              <hr className="border-slate-100" />
+
+              {/* 🔌 CONFIGURATION FOR DATABASE PROVIDER (FIREBASE vs SUPABASE) */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                  <Database className="w-4 h-4 text-slate-450" />
+                  <span>ระบบหลังบ้านเชื่อมข้อมูล (Database Provider)</span>
+                </h4>
+                
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 space-y-4">
+                  <div>
+                    <span className="block text-[11px] font-bold text-slate-500 mb-1.5">เลือกฐานข้อมูลหลักที่ใช้งาน</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setSettingsForm(prev => ({ ...prev, dbProvider: 'firebase' }))}
+                        className={`py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${settingsForm.dbProvider === 'firebase' ? 'bg-purple-650 border-purple-650 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-705 hover:bg-slate-100'}`}
+                      >
+                        🔥 Firebase Firestore
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSettingsForm(prev => ({ ...prev, dbProvider: 'supabase' }))}
+                        className={`py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${settingsForm.dbProvider === 'supabase' ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-705 hover:bg-slate-100'}`}
+                      >
+                        ⚡ Supabase (PostgreSQL)
+                      </button>
+                    </div>
+                  </div>
+
+                  {settingsForm.dbProvider === 'supabase' && (
+                    <div className="space-y-3.5 animate-fade-in border-t border-slate-200/50 pt-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1">Supabase Project URL</label>
+                        <input 
+                          type="text" 
+                          value={settingsForm.supabaseUrl}
+                          onChange={(e) => setSettingsForm(prev => ({ ...prev, supabaseUrl: e.target.value }))}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono focus:outline-hidden focus:ring-1 focus:ring-emerald-300"
+                          placeholder="เช่น https://your-project.supabase.co"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-500 mb-1">Supabase Anon (Public) Key</label>
+                        <input 
+                          type="password" 
+                          value={settingsForm.supabaseAnonKey}
+                          onChange={(e) => setSettingsForm(prev => ({ ...prev, supabaseAnonKey: e.target.value }))}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono focus:outline-hidden focus:ring-1 focus:ring-emerald-300"
+                          placeholder="รหัส API Anon Key ของโปรเจกต์ Supabase"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                        * หมายเหตุ: คุณสามารถดึงข้อมูลค่าพารามิเตอร์เหล่านี้ได้จากหน้า <strong>Dashboard &gt; Settings &gt; API</strong> ของโปรเจกต์คุณใน Supabase เพื่อใช้จัดเก็บข้อมูลแบบ Relational Database แทน Firebase !
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
